@@ -1,0 +1,42 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# Data Raw
+**/data_raw/**/*.csv
+**/data_raw/**/*.parquet
+**/data_raw/**/*.json
+
+
+# Data outputs
+**/data_clean/**/*.csv
+**/data_clean/**/*.parquet
+*.csv
+*.parquet
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+.env
+
+/cache/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Ignore pip cache
+pip-wheel-metadata/
+
+# Ignore compiled C extensions
+*.so
