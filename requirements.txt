@@ -8,3 +8,6 @@ pyarrow
 geopandas
 osmnx
 seaborn
+joblib
+scikit-learn
+folium
