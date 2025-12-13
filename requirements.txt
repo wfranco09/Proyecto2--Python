@@ -10,4 +10,4 @@ osmnx
 seaborn
 joblib
 scikit-learn
-folium
+folium 
