@@ -174,4 +174,102 @@ Los módulos que escriben datos se encargan de crear sus carpetas con `os.makedi
 - Para cambios grandes, crear una rama y enviar un pull request.
 
 ---
- 
+
+## 🧪 Ejecución de Notebooks (Flujo de trabajo)
+
+Esta sección describe el orden recomendado para ejecutar los notebooks del proyecto, una vez que los pipelines ya han sido ejecutados correctamente.
+
+⚠️ Importante: Todos los notebooks dependen de los datasets generados en la carpeta data_clean/.
+Primero deben ejecutarse los pipelines.
+
+## 🔹 Paso 1: Ejecutar el pipeline principal
+
+Ejecuta el pipeline que contiene toda la ingesta y procesamiento de datos climáticos (IMHPA / ETESA):
+
+python -m pipelines.pipeline_runner
+
+
+Selecciona la opción para ejecutar todos los pipelines
+
+Espera a que el proceso termine completamente
+
+Este paso genera los datasets limpios en data_clean/
+
+## 🔹 Paso 2: Limpieza y validación de datos
+
+Luego de que el pipeline finaliza, abre el notebook encargado de la limpieza y validación:
+
+📓 Notebook:
+
+data_clean.ipynb (o equivalente)
+
+En este notebook:
+
+Se revisa la data generada
+
+Se limpian valores nulos o inconsistentes
+
+Se consolida el dataset final que usarán los análisis posteriores
+
+## 🔹 Paso 3: Análisis y visualización IMHPA
+
+Después, ejecuta el notebook de análisis exploratorio:
+
+📓 Notebook:
+
+analisis_imhpa.ipynb
+
+Aquí se realiza:
+
+Visualización de datos climáticos
+
+Análisis por estación
+
+Exploración de tendencias históricas
+
+## 🔹 Paso 4: Series de tiempo y mapas climáticos
+
+Ejecuta el notebook de series de tiempo y mapas:
+
+📓 Notebook:
+
+serie_de_tiempo.ipynb
+
+Este notebook:
+
+Carga automáticamente el dataset limpio desde data_clean/
+
+Muestra mapas climáticos para el año 2025
+
+Incluye la simulación climática para 2026
+
+Genera mapas interactivos con Folium
+
+## 🔹 Paso 5: Entrenamiento y visualización de modelos
+
+Finalmente, ejecuta el notebook donde se entrenan y visualizan los modelos de Machine Learning:
+
+📓 Notebook:
+
+train_and_visualise.ipynb
+
+En este notebook:
+
+Se entrenan los modelos de sequías y inundaciones
+
+Se usan algoritmos de Machine Learning
+
+Se visualizan resultados y métricas
+
+Se generan los modelos finales utilizados por el sistema
+
+## para resumir el flujo de ejecuciones 
+Ejecutar pipelines 1
+
+Ejecutar análisis IMHPA
+
+Ejecutar notebook de limpieza (data_clean)
+
+Ejecutar series de tiempo y mapas (2025 / 2026)
+
+Ejecutar entrenamiento de modelos (sequías e inundaciones)
