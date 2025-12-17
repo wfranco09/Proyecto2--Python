@@ -5,3 +5,4 @@ ipykernel
 folium
 matplotlib
 jupyterlab
+uvicorn
