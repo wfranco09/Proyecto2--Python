@@ -67,24 +67,25 @@ BACKEND_DIR = Path(__file__).parent.parent.parent.parent.parent
 # API Configuration
 METEOSOURCE_API_URL = "https://www.meteosource.com/api/v1/free/point"
 
-# Estaciones de Panamá (mismas +250 estaciones del config)
-STATIONS = [
-    {"id": 1, "name": "Panamá Este", "lat": 9.0892, "lon": -79.3680, "elevation": 15, "region": "Panamá"},
-    {"id": 2, "name": "Panamá Oeste", "lat": 8.9500, "lon": -79.5333, "elevation": 25, "region": "Panamá Oeste"},
-    {"id": 3, "name": "Colón", "lat": 9.3542, "lon": -79.9000, "elevation": 10, "region": "Colón"},
-    {"id": 4, "name": "David", "lat": 8.4333, "lon": -82.4333, "elevation": 27, "region": "Chiriquí"},
-    {"id": 5, "name": "Bocas del Toro", "lat": 9.3403, "lon": -82.2450, "elevation": 5, "region": "Bocas del Toro"},
-    {"id": 6, "name": "Santiago", "lat": 8.1000, "lon": -80.9833, "elevation": 85, "region": "Veraguas"},
-    {"id": 7, "name": "Chitré", "lat": 7.9667, "lon": -80.4333, "elevation": 10, "region": "Herrera"},
-    {"id": 8, "name": "Las Tablas", "lat": 7.7667, "lon": -80.2833, "elevation": 5, "region": "Los Santos"},
-    {"id": 9, "name": "Aguadulce", "lat": 8.2333, "lon": -80.5500, "elevation": 20, "region": "Coclé"},
-    {"id": 10, "name": "Penonomé", "lat": 8.5167, "lon": -80.3500, "elevation": 45, "region": "Coclé"},
-    {"id": 11, "name": "La Chorrera", "lat": 8.8800, "lon": -79.7833, "elevation": 40, "region": "Panamá Oeste"},
-    {"id": 12, "name": "Chepo", "lat": 9.1667, "lon": -79.1000, "elevation": 30, "region": "Panamá"},
-    {"id": 13, "name": "Gatún", "lat": 9.2667, "lon": -79.9167, "elevation": 26, "region": "Colón"},
-    {"id": 14, "name": "Volcán", "lat": 8.7833, "lon": -82.6333, "elevation": 1450, "region": "Chiriquí"},
-    {"id": 15, "name": "Changuinola", "lat": 9.4333, "lon": -82.5167, "elevation": 10, "region": "Bocas del Toro"},
-]
+
+def get_stations_from_db() -> List[Dict]:
+    """
+    Obtiene todas las estaciones desde la base de datos.
+    
+    Returns:
+        Lista de diccionarios con información de estaciones
+    """
+    try:
+        from core.database.raindrop_db import get_all_stations
+        stations = get_all_stations()
+        logger.info(f"📊 Cargadas {len(stations)} estaciones desde la base de datos")
+        return stations
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo estaciones de la base de datos: {e}")
+        # Fallback a config si falla la DB
+        from config import STATIONS as CONFIG_STATIONS
+        logger.warning(f"⚠️ Usando {len(CONFIG_STATIONS)} estaciones desde config.py como fallback")
+        return CONFIG_STATIONS
 
 
 def get_api_key() -> str:
@@ -176,19 +177,22 @@ def fetch_all_stations(api_key: str, delay: float = 0.5) -> List[Dict]:
     """
     all_data = []
     
-    logger.info(f"Iniciando extracción de datos para {len(STATIONS)} estaciones...")
+    # Obtener estaciones desde la base de datos
+    stations = get_stations_from_db()
     
-    for i, station in enumerate(STATIONS):
+    logger.info(f"🚀 Iniciando extracción de datos para {len(stations)} estaciones...")
+    
+    for i, station in enumerate(stations):
         weather_data = fetch_weather_data(station, api_key)
         
         if weather_data:
             all_data.append(weather_data)
         
         # Delay entre requests (excepto en el último)
-        if i < len(STATIONS) - 1:
+        if i < len(stations) - 1:
             time.sleep(delay)
     
-    logger.info(f"Extracción completada: {len(all_data)}/{len(STATIONS)} estaciones exitosas")
+    logger.info(f"✅ Extracción completada: {len(all_data)}/{len(stations)} estaciones exitosas")
     return all_data
 
 
@@ -251,10 +255,13 @@ def run():
         # 3. Guardar directamente en base de datos
         records_saved = save_to_database(weather_data)
         
-        # 4. Entrenar modelo ML con datos históricos
-        train_ml_model()
+        # Obtener número total de estaciones para el resumen
+        stations = get_stations_from_db()
         
         logger.info("=" * 70)
+        print(f"{Colors.GREEN}✅ PIPELINE COMPLETADO EXITOSAMENTE{Colors.RESET}")
+        print(f"{Colors.GREEN}📊 Estaciones procesadas: {len(weather_data)}/{len(stations)}{Colors.RESET}")
+        print(f"{Colors.GREEN}💾
         print(f"{Colors.GREEN} PIPELINE COMPLETADO EXITOSAMENTE{Colors.RESET}")
         print(f"{Colors.GREEN} Estaciones procesadas: {len(weather_data)}/{len(STATIONS)}{Colors.RESET}")
         print(f"{Colors.GREEN} Registros en DB: {records_saved}{Colors.RESET}")
