@@ -40,3 +40,4 @@ pip-wheel-metadata/
 
 # Ignore compiled C extensions
 *.so
+backend/core/database/raindrop.db
