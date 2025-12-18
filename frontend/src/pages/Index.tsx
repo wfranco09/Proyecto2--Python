@@ -47,6 +47,7 @@ const Index = () => {
   const [selectedIncidentLocation, setSelectedIncidentLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [incidentReloadTrigger, setIncidentReloadTrigger] = useState(0);
   const [activeIncidents, setActiveIncidents] = useState<any[]>([]);
+  const [showIncidentsOnMap, setShowIncidentsOnMap] = useState(true);
 
   // Obtener estaciones al montar y cuando cambie el tipo de riesgo
   useEffect(() => {
@@ -342,6 +343,7 @@ const Index = () => {
               incidentMarker={selectedIncidentLocation}
               onIncidentDeleted={handleIncidentDeleted}
               activeIncidents={activeIncidents}
+              showIncidentsOnMap={showIncidentsOnMap}
             />
           ) : (
             <div className="h-full flex items-center justify-center glass-card rounded-xl">
@@ -472,6 +474,16 @@ const Index = () => {
               onClearLocation={() => setSelectedIncidentLocation(null)}
               reloadTrigger={incidentReloadTrigger}
               activeIncidents={activeIncidents}
+              onIncidentCreated={() => {
+                // Recargar incidentes desde el backend
+                loadActiveIncidents();
+              }}
+              onIncidentDeleted={() => {
+                // Recargar incidentes desde el backend
+                loadActiveIncidents();
+              }}
+              showIncidentsOnMap={showIncidentsOnMap}
+              onToggleShowIncidents={setShowIncidentsOnMap}
             />
           )}
           

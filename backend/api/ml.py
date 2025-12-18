@@ -36,51 +36,47 @@ async def train_model(
         Métricas de entrenamiento y accuracy del modelo
     """
     try:
-        logger.info(f"Iniciando entrenamiento con {days_back} días de datos...")
+        logger.info(f"🚀 Iniciando entrenamiento DUAL MODELS (flood + drought) con datos históricos completos...")
         
         metrics = train_model_from_history(days_back=days_back)
         
-        # Extraer información relevante del reporte
-        report = metrics['classification_report']
+        # Extraer información de ambos modelos
+        flood_model = metrics['flood_model']
+        drought_model = metrics['drought_model']
         
         return {
             "status": "success",
-            "message": "Modelo entrenado exitosamente",
+            "message": "Modelos entrenados exitosamente (flood + drought)",
             "metrics": {
-                "accuracy": round(metrics['accuracy'], 4),
                 "training_time": round(metrics['training_time'], 2),
                 "train_samples": metrics['train_samples'],
                 "test_samples": metrics['test_samples'],
                 "timestamp": metrics['timestamp']
             },
-            "feature_importance": {
-                k: round(v, 4) 
-                for k, v in sorted(
-                    metrics['feature_importance'].items(),
-                    key=lambda x: x[1],
-                    reverse=True
-                )[:5]  # Top 5
+            "flood_model": {
+                "r2_score": round(flood_model['r2'], 4),
+                "mae": round(flood_model['mae'], 4),
+                "mse": round(flood_model['mse'], 4),
+                "top_features": {
+                    k: round(v, 4)
+                    for k, v in sorted(
+                        flood_model['feature_importance'].items(),
+                        key=lambda x: x[1],
+                        reverse=True
+                    )[:5]
+                }
             },
-            "class_performance": {
-                "bajo": {
-                    "precision": round(report['bajo']['precision'], 3),
-                    "recall": round(report['bajo']['recall'], 3),
-                    "f1-score": round(report['bajo']['f1-score'], 3)
-                },
-                "moderado": {
-                    "precision": round(report['moderado']['precision'], 3),
-                    "recall": round(report['moderado']['recall'], 3),
-                    "f1-score": round(report['moderado']['f1-score'], 3)
-                },
-                "alto": {
-                    "precision": round(report['alto']['precision'], 3),
-                    "recall": round(report['alto']['recall'], 3),
-                    "f1-score": round(report['alto']['f1-score'], 3)
-                },
-                "critico": {
-                    "precision": round(report['critico']['precision'], 3),
-                    "recall": round(report['critico']['recall'], 3),
-                    "f1-score": round(report['critico']['f1-score'], 3)
+            "drought_model": {
+                "r2_score": round(drought_model['r2'], 4),
+                "mae": round(drought_model['mae'], 4),
+                "mse": round(drought_model['mse'], 4),
+                "top_features": {
+                    k: round(v, 4)
+                    for k, v in sorted(
+                        drought_model['feature_importance'].items(),
+                        key=lambda x: x[1],
+                        reverse=True
+                    )[:5]
                 }
             }
         }
@@ -123,17 +119,17 @@ async def predict_risk(features: Dict):
         if not model_path.exists():
             raise HTTPException(
                 status_code=404,
-                detail="Modelo no encontrado. Entrena el modelo primero usando POST /api/ml/train"
+                detail="Modelos no encontrados. Entrena los modelos primero usando POST /api/ml/train"
             )
         
         predictor = RiskPredictor(model_path=model_path)
         
-        # Predecir
-        risk_level, confidence = predictor.predict(features)
+        # Predecir con ambos modelos
+        predictions = predictor.predict(features)
         
         return {
-            "risk_level": risk_level,
-            "confidence": round(confidence, 4),
+            "flood_risk": round(predictions['flood_risk'], 4),
+            "drought_risk": round(predictions['drought_risk'], 4),
             "features_used": features
         }
         
@@ -166,9 +162,12 @@ async def get_model_info():
         
         return {
             "status": "trained",
-            "model_type": "RandomForestClassifier",
+            "model_type": "Dual RandomForestRegressor (flood + drought)",
             "features": model_data['feature_names'],
-            "classes": list(model_data['label_mapping'].keys()),
+            "output_format": {
+                "flood_risk": "float [0.0 - 1.0]",
+                "drought_risk": "float [0.0 - 1.0]"
+            },
             "trained_at": model_data['timestamp'],
             "model_path": str(model_path)
         }

@@ -261,10 +261,7 @@ def run():
         logger.info("=" * 70)
         print(f"{Colors.GREEN}✅ PIPELINE COMPLETADO EXITOSAMENTE{Colors.RESET}")
         print(f"{Colors.GREEN}📊 Estaciones procesadas: {len(weather_data)}/{len(stations)}{Colors.RESET}")
-        print(f"{Colors.GREEN}💾
-        print(f"{Colors.GREEN} PIPELINE COMPLETADO EXITOSAMENTE{Colors.RESET}")
-        print(f"{Colors.GREEN} Estaciones procesadas: {len(weather_data)}/{len(STATIONS)}{Colors.RESET}")
-        print(f"{Colors.GREEN} Registros en DB: {records_saved}{Colors.RESET}")
+        print(f"{Colors.GREEN}💾 Registros en DB: {records_saved}{Colors.RESET}")
         logger.info("=" * 70)
         
         return True

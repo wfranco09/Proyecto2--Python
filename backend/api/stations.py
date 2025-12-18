@@ -10,7 +10,9 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException
 
 from services import Predictor, RiskCalculator
+from core.ml.risk_predictor import RiskPredictor
 from config import STATIONS, DATA_CLEAN_PATH
+from pathlib import Path
 from core.database.raindrop_db import (
     get_all_stations_latest, 
     get_latest_data_by_station,
@@ -22,6 +24,22 @@ from core.database.raindrop_db import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Instancia singleton del modelo ML
+_risk_predictor_instance = None
+
+def get_risk_predictor():
+    """Obtiene una instancia singleton del RiskPredictor."""
+    global _risk_predictor_instance
+    if _risk_predictor_instance is None:
+        model_path = Path(__file__).parent.parent / "ml_models" / "risk_model.joblib"
+        if model_path.exists():
+            _risk_predictor_instance = RiskPredictor(model_path=model_path)
+            logger.info(f"✅ Modelo ML cargado (singleton): {model_path}")
+        else:
+            _risk_predictor_instance = None
+            logger.warning("⚠️ Modelo ML no encontrado, usando cálculo simple")
+    return _risk_predictor_instance
 
 
 def _get_station_info(station_id: int) -> Optional[dict]:
@@ -173,21 +191,41 @@ async def list_all_stations():
                 })
                 continue
             
-            # Calcular probabilidades basadas en datos reales
-            # Validar que los valores no sean None
-            rainfall = station_data.get("precipitation_total") or 0.0
-            humidity = station_data.get("humidity") or 0.0
+            # Calcular probabilidades usando el modelo ML entrenado
+            try:
+                ml_predictor = get_risk_predictor()
+                if ml_predictor:
+                    # Preparar features para el modelo
+                    features = {
+                        'temperature': float(station_data.get('temperature') or 25.0),
+                        'humidity': float(station_data.get('humidity') or 70.0),
+                        'precipitation_total': float(station_data.get('precipitation_total') or 0.0),
+                        'wind_speed': float(station_data.get('wind_speed') or 0.0),
+                        'pressure': float(station_data.get('pressure') or 1013.0),
+                        # Cambios estimados vs promedios típicos de Panamá
+                        'temp_change': float(station_data.get('temperature') or 25.0) - 27.0,
+                        'humidity_change': float(station_data.get('humidity') or 70.0) - 75.0,
+                        'precip_change': float(station_data.get('precipitation_total') or 0.0) - 5.0,
+                        'wind_change': float(station_data.get('wind_speed') or 0.0) - 10.0,
+                        'pressure_change': float(station_data.get('pressure') or 1013.0) - 1013.0
+                    }
+                    
+                    # Usar modelo ML para predicción
+                    predictions = ml_predictor.predict(features)
+                    flood_prob = predictions['flood_risk']
+                    drought_prob = predictions['drought_risk']
+                else:
+                    raise ValueError("Modelo no disponible")
+            except Exception as e:
+                # Fallback: cálculo simple si el modelo no está disponible
+                logger.warning(f"Usando cálculo simple para estación {station_id}: {e}")
+                rainfall = float(station_data.get("precipitation_total") or 0.0)
+                humidity = float(station_data.get("humidity") or 0.0)
+                flood_prob = min(0.95, (rainfall / 50.0) * 0.6 + (humidity / 100.0) * 0.4)
+                drought_prob = min(0.95, (1 - rainfall / 50.0) * 0.6 + (1 - humidity / 100.0) * 0.4)
             
-            # Asegurar que sean float
-            rainfall = float(rainfall)
-            humidity = float(humidity)
-            
-            # Riesgo de inundación
-            flood_prob = min(0.95, (rainfall / 50.0) * 0.6 + (humidity / 100.0) * 0.4)
+            # Determinar niveles categóricos
             flood_level = predictor._get_risk_level(flood_prob)
-            
-            # Riesgo de sequía
-            drought_prob = min(0.95, (1 - rainfall / 50.0) * 0.6 + (1 - humidity / 100.0) * 0.4)
             drought_level = predictor._get_risk_level(drought_prob)
             
             # Preparar operaciones de alertas (no ejecutar todavía)
