@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 # ============================================================
 # CONFIG DEL PROYECTO (MISMO QUE USA EL MODELO)
 # ============================================================
-from backend.config import (
+from config import (
     FEATURE_COLUMNS,
     MASTER_DATASET,
     DATA_CLEAN_PATH
