@@ -379,6 +379,46 @@ def get_data_by_date_range(start_date: str, end_date: str, station_id: Optional[
     return [dict(row) for row in rows]
 
 
+def get_all_stations() -> List[Dict]:
+    """
+    Obtiene todas las estaciones desde la tabla stations.
+    
+    Returns:
+        Lista de diccionarios con información de todas las estaciones
+    """
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT 
+            id,
+            name,
+            region,
+            latitude as lat,
+            longitude as lon,
+            elevation
+        FROM stations
+        ORDER BY id
+    """)
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    stations = []
+    for row in rows:
+        stations.append({
+            "id": row["id"],
+            "name": row["name"],
+            "region": row["region"],
+            "lat": row["lat"],
+            "lon": row["lon"],
+            "elevation": row["elevation"]
+        })
+    
+    return stations
+
+
 def get_all_stations_latest() -> List[Dict]:
     """
     Obtiene el último registro de cada estación con datos válidos de humedad.
