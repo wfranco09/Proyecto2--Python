@@ -112,6 +112,7 @@ async def list_all_stations():
                 data.append({
                     "id": station.get("id"),
                     "name": station.get("name"),
+                    "region": station.get("region"),
                     "lat": station.get("lat"),
                     "lon": station.get("lon"),
                     "elevation": station.get("elevation", 0),
@@ -155,6 +156,7 @@ async def list_all_stations():
                 data.append({
                     "id": station_id,
                     "name": station.get("name"),
+                    "region": station.get("region"),
                     "lat": station.get("lat"),
                     "lon": station.get("lon"),
                     "elevation": station.get("elevation", 0),
@@ -207,6 +209,7 @@ async def list_all_stations():
             data.append({
                 "id": station_id,
                 "name": station.get("name"),
+                "region": station.get("region"),
                 "lat": station.get("lat"),
                 "lon": station.get("lon"),
                 "elevation": station.get("elevation", 0),

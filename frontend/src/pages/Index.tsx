@@ -283,10 +283,19 @@ const Index = () => {
       
       if (probability * 100 < minRisk) return false;
       if (onlyAlerts && !riskData.alert) return false;
-      // TODO: Add province filtering when backend provides region data
+      
+      // Filtrar por provincia usando el atributo 'region' del backend (case-insensitive)
+      if (selectedProvince !== "Todas" && station.region) {
+        const normalizedRegion = station.region.toUpperCase();
+        const normalizedSelected = selectedProvince.toUpperCase();
+        if (normalizedRegion !== normalizedSelected) {
+          return false;
+        }
+      }
+      
       return true;
     });
-  }, [displayStations, riskType, minRisk, onlyAlerts]);
+  }, [displayStations, riskType, minRisk, onlyAlerts, selectedProvince]);
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
