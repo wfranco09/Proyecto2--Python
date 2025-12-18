@@ -327,13 +327,16 @@ export const generateHistoricalData = (days: number = 7): HistoricalData[] => {
 
 export const provinces = [
   "Todas",
-  "Bocas del Toro",
-  "Coclé",
-  "Colón",
-  "Chiriquí",
-  "Darién",
-  "Herrera",
-  "Los Santos",
-  "Panamá",
-  "Veraguas"
+  "BOCAS DEL TORO",
+  "CHIRIQUI",
+  "COCLE",
+  "COLON",
+  "DARIEN",
+  "GNABE BUGLE",
+  "GUNA YALA",
+  "HERRERA",
+  "LOS SANTOS",
+  "PANAMA",
+  "PANAMA OESTE",
+  "VERAGUAS"
 ];
