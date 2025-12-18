@@ -1,6 +1,35 @@
 # 🌧️ rAIndrop - Sistema de Predicción de Riesgos Climáticos en Panamá
 
-Sistema completo de análisis y predicción de riesgos climáticos usando datos en tiempo real de +250 estaciones meteorológicas en Panamá.
+## 🎯 Acerca del Proyecto
+
+**rAIndrop** es un sistema avanzado de predicción y análisis de riesgos climáticos desarrollado para Panamá, que utiliza inteligencia artificial y datos en tiempo real de más de 250 estaciones meteorológicas distribuidas a lo largo del país. El sistema combina análisis de series temporales, modelos de machine learning y visualización interactiva para predecir y alertar sobre riesgos de inundación y sequía.
+
+### Objetivo
+
+Proporcionar una herramienta de predicción de riesgos climáticos que permita:
+- Monitoreo en tiempo real de condiciones meteorológicas
+- Predicción de riesgos de inundación y sequía con hasta 48 horas de anticipación
+- Generación de alertas tempranas para la toma de decisiones
+- Análisis histórico y tendencias climáticas
+- Reportes ciudadanos de incidencias para mejorar la precisión del modelo
+
+### Tecnologías Principales
+
+- **Backend**: Python, FastAPI, SQLite
+- **Machine Learning**: scikit-learn (RandomForest), pandas, numpy
+- **Frontend**: React, TypeScript, Vite, Leaflet
+- **Fuente de Datos**: API Meteosource (+ reportes ciudadanos)
+
+---
+
+## 👥 Equipo de Desarrollo
+
+| Nombre | Rol |
+|--------|-----|
+| **Isaac Escobar** | Arquitecto de Software & Machine Learning Engineer |
+| **Arturo Rodríguez** | Coordinador |
+| **Luis García** | Documentación |
+| **Winston Franco** | Científico de Datos |
 
 ---
 
