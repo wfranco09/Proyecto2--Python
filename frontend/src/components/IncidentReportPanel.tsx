@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { MapPin, AlertTriangle, Droplets, Sun, X, Send, Navigation, Trash2 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { MapPin, AlertTriangle, Droplets, Sun, X, Send, Navigation, Trash2, Eye, EyeOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "@/hooks/use-toast";
 
@@ -13,6 +14,10 @@ interface IncidentReportPanelProps {
   onClearLocation: () => void;
   reloadTrigger?: number;
   activeIncidents?: any[];
+  onIncidentCreated?: (incident: any) => void;
+  onIncidentDeleted?: (incidentId: number) => void;
+  showIncidentsOnMap?: boolean;
+  onToggleShowIncidents?: (show: boolean) => void;
 }
 
 interface Incident {
@@ -30,11 +35,22 @@ export const IncidentReportPanel = ({
   selectedLocation,
   onClearLocation,
   reloadTrigger,
-  activeIncidents = []
+  activeIncidents = [],
+  onIncidentCreated,
+  onIncidentDeleted,
+  showIncidentsOnMap = true,
+  onToggleShowIncidents
 }: IncidentReportPanelProps) => {
   const [incidentType, setIncidentType] = useState<'flood' | 'drought'>('flood');
+  const [severity, setSeverity] = useState<'low' | 'medium' | 'high'>('medium');
   const [description, setDescription] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [localIncidents, setLocalIncidents] = useState<any[]>([]);
+
+  // Sincronizar incidentes locales con los del parent
+  useEffect(() => {
+    setLocalIncidents(activeIncidents);
+  }, [activeIncidents]);
 
   const handleSubmit = async () => {
     if (!selectedLocation) {
@@ -46,18 +62,25 @@ export const IncidentReportPanel = ({
       return;
     }
 
-    if (!description.trim()) {
-      toast({
-        title: "Descripción requerida",
-        description: "Por favor describe la anomalía o incidencia",
-        variant: "destructive",
-      });
-      return;
-    }
-
     setIsSubmitting(true);
 
     try {
+      // Crear incidente temporal para mostrar inmediatamente (optimistic update)
+      const tempIncident = {
+        id: Date.now(), // ID temporal
+        incident_type: incidentType,
+        description: description.trim(),
+        latitude: selectedLocation.lat,
+        longitude: selectedLocation.lon,
+        severity: severity,
+        reported_by: 'web_user',
+        reported_at: new Date().toISOString(),
+        status: 'active'
+      };
+
+      // Actualizar UI inmediatamente (optimistic)
+      setLocalIncidents(prev => [tempIncident, ...prev]);
+
       // Enviar al backend
       const response = await fetch('http://localhost:8000/api/incidents', {
         method: 'POST',
@@ -69,17 +92,52 @@ export const IncidentReportPanel = ({
           description: description.trim(),
           latitude: selectedLocation.lat,
           longitude: selectedLocation.lon,
-          severity: 'medium',
+          severity: severity,
           reported_by: 'web_user'
         }),
       });
 
       if (!response.ok) {
-        throw new Error('Error al enviar el reporte');
+        // Revertir optimistic update si falla
+        setLocalIncidents(prev => prev.filter(inc => inc.id !== tempIncident.id));
+        
+        // Intentar parsear el error del backend para mostrar detalles
+        let errorMessage = 'Error al enviar el reporte';
+        try {
+          const errorData = await response.json();
+          if (errorData.detail) {
+            // Si es un array de errores de validación (422)
+            if (Array.isArray(errorData.detail)) {
+              errorMessage = errorData.detail.map((err: any) => 
+                `${err.loc?.join('.') || 'Campo'}: ${err.msg}`
+              ).join('; ');
+            } else {
+              errorMessage = errorData.detail;
+            }
+          }
+        } catch (e) {
+          // Si no se puede parsear el error, usar mensaje genérico
+        }
+        throw new Error(errorMessage);
       }
 
-      // Recargar la lista de reportes activos
-      await loadActiveIncidents();
+      // Parsear respuesta JSON del backend
+      const result = await response.json();
+      
+      // Reemplazar incidente temporal con el real
+      const realIncident = {
+        ...tempIncident,
+        id: result.id // Usar ID real del backend
+      };
+      
+      setLocalIncidents(prev => 
+        prev.map(inc => inc.id === tempIncident.id ? realIncident : inc)
+      );
+
+      // Notificar al parent component
+      if (onIncidentCreated) {
+        onIncidentCreated(realIncident);
+      }
       
       setDescription("");
       onClearLocation();
@@ -90,9 +148,10 @@ export const IncidentReportPanel = ({
       });
     } catch (error) {
       console.error('Error al enviar reporte:', error);
+      const errorMessage = error instanceof Error ? error.message : "No se pudo enviar el reporte";
       toast({
         title: "Error",
-        description: "No se pudo enviar el reporte. Intenta nuevamente.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -105,22 +164,32 @@ export const IncidentReportPanel = ({
       return;
     }
 
+    // Guardar copia para revertir si falla
+    const previousIncidents = [...localIncidents];
+
     try {
+      // Actualizar UI inmediatamente (optimistic)
+      setLocalIncidents(prev => prev.filter(inc => inc.id !== incidentId));
+
       const response = await fetch(`http://localhost:8000/api/incidents/${incidentId}`, {
         method: 'DELETE',
       });
 
-      if (response.ok) {
-        // Actualizar la lista localmente
-        setIncidents(prev => prev.filter(inc => inc.id !== incidentId));
-        
-        toast({
-          title: "Reporte eliminado",
-          description: "El reporte ha sido eliminado exitosamente",
-        });
-      } else {
+      if (!response.ok) {
+        // Revertir si falla
+        setLocalIncidents(previousIncidents);
         throw new Error('Error al eliminar');
       }
+
+      // Notificar al parent component
+      if (onIncidentDeleted) {
+        onIncidentDeleted(incidentId);
+      }
+        
+      toast({
+        title: "Reporte eliminado",
+        description: "El reporte ha sido eliminado exitosamente",
+      });
     } catch (error) {
       console.error('Error eliminando reporte:', error);
       toast({
@@ -162,6 +231,36 @@ export const IncidentReportPanel = ({
                 <div className="flex items-center gap-2">
                   <Sun className="w-4 h-4 text-warning" />
                   <span>Sequía</span>
+                </div>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Severity Selection */}
+        <div>
+          <label className="text-sm text-muted-foreground mb-2 block">Severidad</label>
+          <Select value={severity} onValueChange={(val: 'low' | 'medium' | 'high') => setSeverity(val)}>
+            <SelectTrigger className="w-full bg-secondary/50 border-border/50">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-card border-border z-50">
+              <SelectItem value="low">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-green-500" />
+                  <span>Baja</span>
+                </div>
+              </SelectItem>
+              <SelectItem value="medium">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-yellow-500" />
+                  <span>Media</span>
+                </div>
+              </SelectItem>
+              <SelectItem value="high">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-red-500" />
+                  <span>Alta</span>
                 </div>
               </SelectItem>
             </SelectContent>
@@ -225,7 +324,7 @@ export const IncidentReportPanel = ({
         {/* Submit Button */}
         <Button
           onClick={handleSubmit}
-          disabled={isSubmitting || !selectedLocation || !description.trim()}
+          disabled={isSubmitting || !selectedLocation}
           className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
         >
           <Send className={`w-4 h-4 mr-2 ${isSubmitting ? 'animate-pulse' : ''}`} />
@@ -233,11 +332,25 @@ export const IncidentReportPanel = ({
         </Button>
 
         {/* Recent Incidents */}
-        {activeIncidents.length > 0 && (
+        {localIncidents.length > 0 && (
           <div className="mt-4 pt-4 border-t border-border/50">
-            <h4 className="text-sm font-medium text-foreground mb-3">Reportes recientes</h4>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-medium text-foreground">Reportes recientes</h4>
+              <div className="flex items-center gap-2">
+                {showIncidentsOnMap ? (
+                  <Eye className="w-4 h-4 text-success" />
+                ) : (
+                  <EyeOff className="w-4 h-4 text-muted-foreground" />
+                )}
+                <Switch
+                  checked={showIncidentsOnMap}
+                  onCheckedChange={(checked) => onToggleShowIncidents?.(checked)}
+                  className="data-[state=checked]:bg-success"
+                />
+              </div>
+            </div>
             <div className="space-y-2 max-h-[150px] overflow-y-auto scrollbar-thin">
-              {activeIncidents.slice(0, 5).map((incident) => {
+              {localIncidents.slice(0, 5).map((incident) => {
                 const reportDate = new Date(incident.reported_at);
                 return (
                   <motion.div

@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 class IncidentReportCreate(BaseModel):
     """Modelo para crear un reporte de incidencia"""
     incident_type: str = Field(..., description="Tipo: 'flood' o 'drought'")
-    description: str = Field(..., min_length=10, max_length=500)
+    description: Optional[str] = Field("", max_length=500, description="Descripción opcional")
     latitude: float = Field(..., ge=-90, le=90)
     longitude: float = Field(..., ge=-180, le=180)
     severity: Optional[str] = Field("medium", description="Severidad: 'low', 'medium', 'high'")
@@ -66,14 +66,42 @@ async def create_incident_report(report: IncidentReportCreate):
         
         report_id = insert_incident_report(report_data)
         
-        logger.info(f"Reporte creado: ID={report_id}, Tipo={report.incident_type}")
+        logger.info(f"Reporte creado: ID={report_id}, Tipo={report.incident_type}, Severidad={report.severity}")
+        
+        # Trigger automático de re-entrenamiento en background
+        try:
+            from core.ml.incident_correlation import get_incident_training_data
+            import threading
+            
+            def retrain_model():
+                """Re-entrena el modelo con el nuevo incidente."""
+                try:
+                    # Verificar que hay suficientes incidentes (mínimo 10)
+                    X, y_flood, y_drought = get_incident_training_data()
+                    if len(X) >= 10:
+                        logger.info(f"🔄 Re-entrenando modelo con {len(X)} incidentes...")
+                        from core.ml import train_model_from_history
+                        train_model_from_history(days_back=7)
+                        logger.info("✅ Modelo re-entrenado exitosamente")
+                    else:
+                        logger.info(f"⏳ Esperando más incidentes para re-entrenamiento ({len(X)}/10)")
+                except Exception as e:
+                    logger.warning(f"⚠️ No se pudo re-entrenar modelo: {e}")
+            
+            # Ejecutar en thread separado para no bloquear la respuesta
+            thread = threading.Thread(target=retrain_model, daemon=True, name="ModelRetraining")
+            thread.start()
+            
+        except Exception as e:
+            logger.warning(f"⚠️ No se pudo iniciar re-entrenamiento automático: {e}")
         
         return {
             "id": report_id,
             "message": "Reporte de incidencia creado exitosamente",
             "incident_type": report.incident_type,
             "severity": report.severity,
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "auto_retrain": "Model retraining triggered in background"
         }
         
     except HTTPException:

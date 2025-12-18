@@ -739,6 +739,8 @@ def insert_or_update_forecast_data(forecast_data: List[Dict]) -> int:
 def get_forecast_by_station(station_id: int, days: int = 7) -> List[Dict]:
     """
     Obtiene pronóstico de los próximos N días para una estación.
+    Si no hay datos válidos para hoy/mañana (probabilidades = 0.0), usa los datos 
+    más recientes disponibles con riesgos calculados (fallback).
     
     Args:
         station_id: ID de la estación
@@ -754,6 +756,7 @@ def get_forecast_by_station(station_id: int, days: int = 7) -> List[Dict]:
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
+    # Primero intentar obtener datos de hoy en adelante
     cursor.execute("""
         SELECT * FROM weather_forecast
         WHERE station_id = ?
@@ -763,6 +766,27 @@ def get_forecast_by_station(station_id: int, days: int = 7) -> List[Dict]:
     """, (station_id, today, days))
     
     rows = cursor.fetchall()
+    
+    # Verificar si los datos tienen riesgos calculados
+    has_valid_risks = False
+    if rows:
+        for row in rows:
+            if row['flood_probability'] > 0.0 or row['drought_probability'] > 0.0:
+                has_valid_risks = True
+                break
+    
+    # Si no hay datos o no tienen riesgos calculados, usar los datos más recientes con riesgos
+    if not rows or not has_valid_risks:
+        logger.warning(f"⚠️ No hay datos de forecast válidos para estación {station_id}, usando datos más recientes con riesgos calculados")
+        cursor.execute("""
+            SELECT * FROM weather_forecast
+            WHERE station_id = ?
+            AND (flood_probability > 0.0 OR drought_probability > 0.0)
+            ORDER BY forecast_date DESC
+            LIMIT ?
+        """, (station_id, days))
+        rows = cursor.fetchall()
+    
     conn.close()
     
     return [dict(row) for row in rows]
@@ -771,6 +795,8 @@ def get_forecast_by_station(station_id: int, days: int = 7) -> List[Dict]:
 def get_all_forecasts(days: int = 7) -> Dict[int, List[Dict]]:
     """
     Obtiene pronósticos de todas las estaciones agrupados por station_id.
+    Si no hay datos válidos para hoy/mañana (probabilidades = 0.0), usa los datos 
+    más recientes disponibles con riesgos calculados (fallback).
     
     Args:
         days: Número de días a obtener (default: 7)
@@ -785,6 +811,7 @@ def get_all_forecasts(days: int = 7) -> Dict[int, List[Dict]]:
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
+    # Primero intentar obtener datos de hoy en adelante
     cursor.execute("""
         SELECT * FROM weather_forecast
         WHERE forecast_date >= ?
@@ -792,6 +819,25 @@ def get_all_forecasts(days: int = 7) -> Dict[int, List[Dict]]:
     """, (today,))
     
     rows = cursor.fetchall()
+    
+    # Verificar si los datos tienen riesgos calculados (probabilidades > 0)
+    has_valid_risks = False
+    if rows:
+        for row in rows:
+            if row['flood_probability'] > 0.0 or row['drought_probability'] > 0.0:
+                has_valid_risks = True
+                break
+    
+    # Si no hay datos o no tienen riesgos calculados, usar los datos más recientes con riesgos
+    if not rows or not has_valid_risks:
+        logger.warning("⚠️ No hay datos de forecast válidos para hoy, usando datos más recientes con riesgos calculados")
+        cursor.execute("""
+            SELECT * FROM weather_forecast
+            WHERE flood_probability > 0.0 OR drought_probability > 0.0
+            ORDER BY forecast_date DESC, station_id
+        """)
+        rows = cursor.fetchall()
+    
     conn.close()
     
     # Agrupar por estación
