@@ -263,8 +263,10 @@ def insert_or_update_weather_data(weather_data: List[Dict]) -> int:
                     wind_speed, wind_direction, wind_angle,
                     precipitation_total, precipitation_type,
                     pressure, cloud_cover, summary, icon,
+                    flood_probability, flood_level,
+                    drought_probability, drought_level,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(station_id, date, hour) 
                 DO UPDATE SET
                     timestamp = excluded.timestamp,
@@ -280,6 +282,10 @@ def insert_or_update_weather_data(weather_data: List[Dict]) -> int:
                     cloud_cover = excluded.cloud_cover,
                     summary = excluded.summary,
                     icon = excluded.icon,
+                    flood_probability = excluded.flood_probability,
+                    flood_level = excluded.flood_level,
+                    drought_probability = excluded.drought_probability,
+                    drought_level = excluded.drought_level,
                     updated_at = excluded.updated_at
             """, (
                 data['station_id'], 
@@ -294,6 +300,8 @@ def insert_or_update_weather_data(weather_data: List[Dict]) -> int:
                 data.get('precipitation_total'), data.get('precipitation_type'),
                 data.get('pressure'), data.get('cloud_cover'),
                 data.get('summary'), data.get('icon'),
+                data.get('flood_probability', 0.0), data.get('flood_level', 'GREEN'),
+                data.get('drought_probability', 0.0), data.get('drought_level', 'GREEN'),
                 now, now
             ))
             
@@ -421,45 +429,31 @@ def get_all_stations() -> List[Dict]:
 
 def get_all_stations_latest() -> List[Dict]:
     """
-    Obtiene el último registro de cada estación con datos válidos de humedad.
-    Prioriza datos con humedad > 0 para usar datos generados en lugar de Meteosource incompletos.
+    Obtiene el último registro de cada estación.
+    OPTIMIZADO: Usa MAX() para mejor performance en tablas grandes.
     
     Returns:
-        Lista con el último dato válido de cada estación
+        Lista con el último dato de cada estación
     """
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
-    # Primero intentar obtener datos con humedad válida (datos dummy generados)
+    # Query super optimizada usando MAX y GROUP BY
     cursor.execute("""
-        SELECT w1.* FROM weather_hourly w1
+        SELECT w.*
+        FROM weather_hourly w
         INNER JOIN (
-            SELECT station_id, MAX(date || ' ' || printf('%02d', hour)) as max_datetime
+            SELECT station_id, 
+                   MAX(date || ' ' || printf('%02d', hour)) as max_datetime
             FROM weather_hourly
-            WHERE humidity IS NOT NULL AND humidity > 0
             GROUP BY station_id
-        ) w2 ON w1.station_id = w2.station_id 
-        AND (w1.date || ' ' || printf('%02d', w1.hour)) = w2.max_datetime
-        ORDER BY w1.station_id
+        ) latest ON w.station_id = latest.station_id
+        AND (w.date || ' ' || printf('%02d', w.hour)) = latest.max_datetime
+        ORDER BY w.station_id
     """)
     
     rows = cursor.fetchall()
-    
-    # Si no hay datos con humedad, caer al último registro sin filtro
-    if not rows:
-        cursor.execute("""
-            SELECT w1.* FROM weather_hourly w1
-            INNER JOIN (
-                SELECT station_id, MAX(date || ' ' || printf('%02d', hour)) as max_datetime
-                FROM weather_hourly
-                GROUP BY station_id
-            ) w2 ON w1.station_id = w2.station_id 
-            AND (w1.date || ' ' || printf('%02d', w1.hour)) = w2.max_datetime
-            ORDER BY w1.station_id
-        """)
-        rows = cursor.fetchall()
-    
     conn.close()
     
     return [dict(row) for row in rows]
@@ -756,7 +750,7 @@ def get_forecast_by_station(station_id: int, days: int = 7) -> List[Dict]:
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
-    # Primero intentar obtener datos de hoy en adelante
+    # Obtener datos de hoy en adelante
     cursor.execute("""
         SELECT * FROM weather_forecast
         WHERE station_id = ?
@@ -766,27 +760,6 @@ def get_forecast_by_station(station_id: int, days: int = 7) -> List[Dict]:
     """, (station_id, today, days))
     
     rows = cursor.fetchall()
-    
-    # Verificar si los datos tienen riesgos calculados
-    has_valid_risks = False
-    if rows:
-        for row in rows:
-            if row['flood_probability'] > 0.0 or row['drought_probability'] > 0.0:
-                has_valid_risks = True
-                break
-    
-    # Si no hay datos o no tienen riesgos calculados, usar los datos más recientes con riesgos
-    if not rows or not has_valid_risks:
-        logger.warning(f"⚠️ No hay datos de forecast válidos para estación {station_id}, usando datos más recientes con riesgos calculados")
-        cursor.execute("""
-            SELECT * FROM weather_forecast
-            WHERE station_id = ?
-            AND (flood_probability > 0.0 OR drought_probability > 0.0)
-            ORDER BY forecast_date DESC
-            LIMIT ?
-        """, (station_id, days))
-        rows = cursor.fetchall()
-    
     conn.close()
     
     return [dict(row) for row in rows]
@@ -811,7 +784,7 @@ def get_all_forecasts(days: int = 7) -> Dict[int, List[Dict]]:
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
-    # Primero intentar obtener datos de hoy en adelante
+    # Obtener datos de hoy en adelante
     cursor.execute("""
         SELECT * FROM weather_forecast
         WHERE forecast_date >= ?
@@ -819,25 +792,6 @@ def get_all_forecasts(days: int = 7) -> Dict[int, List[Dict]]:
     """, (today,))
     
     rows = cursor.fetchall()
-    
-    # Verificar si los datos tienen riesgos calculados (probabilidades > 0)
-    has_valid_risks = False
-    if rows:
-        for row in rows:
-            if row['flood_probability'] > 0.0 or row['drought_probability'] > 0.0:
-                has_valid_risks = True
-                break
-    
-    # Si no hay datos o no tienen riesgos calculados, usar los datos más recientes con riesgos
-    if not rows or not has_valid_risks:
-        logger.warning("⚠️ No hay datos de forecast válidos para hoy, usando datos más recientes con riesgos calculados")
-        cursor.execute("""
-            SELECT * FROM weather_forecast
-            WHERE flood_probability > 0.0 OR drought_probability > 0.0
-            ORDER BY forecast_date DESC, station_id
-        """)
-        rows = cursor.fetchall()
-    
     conn.close()
     
     # Agrupar por estación

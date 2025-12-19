@@ -8,6 +8,7 @@ Free plan: 400 calls/day - Current weather + 7-day forecast
 
 import os
 import sys
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -66,6 +67,41 @@ BACKEND_DIR = Path(__file__).parent.parent.parent.parent.parent
 
 # API Configuration
 METEOSOURCE_API_URL = "https://www.meteosource.com/api/v1/free/point"
+
+# Archivo para rastrear estado de la API
+API_STATE_FILE = BACKEND_DIR / "cache" / "api_state.json"
+
+
+def get_api_state() -> Dict:
+    """Lee el estado de la API desde el archivo cache."""
+    if API_STATE_FILE.exists():
+        try:
+            with open(API_STATE_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            pass
+    return {"last_success": None, "consecutive_failures": 0, "last_attempt_date": None}
+
+
+def should_attempt_api() -> bool:
+    """
+    Determina si debemos intentar llamar a la API.
+    Después de 10 fallos consecutivos en el mismo día, no intentar más.
+    """
+    state = get_api_state()
+    from datetime import date
+    today = str(date.today())
+    
+    # Si es un nuevo día, resetear el contador
+    if state.get("last_attempt_date") != today:
+        return True
+    
+    # Si ya fallamos 10 veces hoy, no intentar más
+    if state.get("consecutive_failures", 0) >= 10:
+        logger.warning(f" Límite de fallos alcanzado hoy ({state['consecutive_failures']}). Pipeline cancelado.")
+        return False
+    
+    return True
 
 
 def get_stations_from_db() -> List[Dict]:
@@ -164,6 +200,73 @@ def fetch_weather_data(station: Dict, api_key: str) -> Optional[Dict]:
         return None
 
 
+def calculate_risks_for_data(data: List[Dict]) -> List[Dict]:
+    """
+    Calcula riesgos ML para los datos obtenidos.
+    
+    Args:
+        data: Lista de datos climáticos
+        
+    Returns:
+        Lista de datos con riesgos agregados
+    """
+    try:
+        from core.ml.risk_predictor import RiskPredictor
+        model_path = BACKEND_DIR / "ml_models" / "risk_model.joblib"
+        
+        if not model_path.exists():
+            logger.warning(" Modelo ML no encontrado, usando valores por defecto")
+            for item in data:
+                item["flood_probability"] = 0.0
+                item["flood_level"] = "GREEN"
+                item["drought_probability"] = 0.0
+                item["drought_level"] = "GREEN"
+            return data
+        
+        predictor = RiskPredictor(model_path=model_path)
+        logger.info(f" Calculando riesgos ML para {len(data)} estaciones...")
+        
+        for item in data:
+            try:
+                features = {
+                    'temperature': float(item.get('temperature') or 25.0),
+                    'humidity': float(item.get('humidity') or 0.0),
+                    'precipitation_total': float(item.get('precipitation_total') or 0.0),
+                    'wind_speed': float(item.get('wind_speed') or 0.0),
+                    'pressure': float(item.get('pressure') or 1013.0),
+                    'temp_change': float(item.get('temperature') or 25.0) - 27.0,
+                    'humidity_change': float(item.get('humidity') or 0.0) - 75.0,
+                    'precip_change': float(item.get('precipitation_total') or 0.0) - 5.0,
+                    'wind_change': float(item.get('wind_speed') or 0.0) - 10.0,
+                    'pressure_change': float(item.get('pressure') or 1013.0) - 1013.0
+                }
+                
+                predictions = predictor.predict(features)
+                item["flood_probability"] = predictions['flood_risk']
+                item["flood_level"] = "RED" if predictions['flood_risk'] >= 0.7 else ("YELLOW" if predictions['flood_risk'] >= 0.3 else "GREEN")
+                item["drought_probability"] = predictions['drought_risk']
+                item["drought_level"] = "RED" if predictions['drought_risk'] >= 0.7 else ("YELLOW" if predictions['drought_risk'] >= 0.3 else "GREEN")
+            except Exception as e:
+                logger.warning(f"Error calculando riesgo para estación {item.get('station_id')}: {e}")
+                item["flood_probability"] = 0.0
+                item["flood_level"] = "GREEN"
+                item["drought_probability"] = 0.0
+                item["drought_level"] = "GREEN"
+        
+        logger.info(f" Riesgos calculados para {len(data)} estaciones")
+        return data
+        
+    except Exception as e:
+        logger.error(f"Error en cálculo de riesgos: {e}")
+        # Agregar valores por defecto
+        for item in data:
+            item["flood_probability"] = 0.0
+            item["flood_level"] = "GREEN"
+            item["drought_probability"] = 0.0
+            item["drought_level"] = "GREEN"
+        return data
+
+
 def fetch_all_stations(api_key: str, delay: float = 0.5) -> List[Dict]:
     """
     Obtiene datos de todas las estaciones con un delay entre requests.
@@ -173,7 +276,7 @@ def fetch_all_stations(api_key: str, delay: float = 0.5) -> List[Dict]:
         delay: Segundos de espera entre requests (para respetar rate limits)
         
     Returns:
-        Lista de diccionarios con datos de todas las estaciones
+        Lista de diccionarios con datos de todas las estaciones (con riesgos ML)
     """
     all_data = []
     
@@ -193,6 +296,10 @@ def fetch_all_stations(api_key: str, delay: float = 0.5) -> List[Dict]:
             time.sleep(delay)
     
     logger.info(f"✅ Extracción completada: {len(all_data)}/{len(stations)} estaciones exitosas")
+    
+    # Calcular riesgos ML para todos los datos obtenidos
+    all_data = calculate_risks_for_data(all_data)
+    
     return all_data
 
 
@@ -240,6 +347,11 @@ def run():
         logger.info("=" * 70)
         logger.info("INICIANDO PIPELINE DE METEOSOURCE")
         logger.info("=" * 70)
+        
+        # Verificar si debemos intentar la API
+        if not should_attempt_api():
+            logger.info("Pipeline cancelado - límite de fallos alcanzado hoy")
+            return True  # No es un error, solo no intentamos más
         
         # 1. Obtener API key
         api_key = get_api_key()

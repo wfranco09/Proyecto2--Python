@@ -48,7 +48,6 @@ class RiskPredictor:
             'temp_change', 'humidity_change', 'precip_change',
             'wind_change', 'pressure_change'
         ]
-        self.reverse_mapping = {v: k for k, v in self.label_mapping.items()}
         
         if model_path and model_path.exists():
             self.load_model(model_path)

@@ -169,14 +169,26 @@ const Index = () => {
       // Almacenar todos los datos de pronóstico para ambos días
       setAllForecastData(allForecasts);
       
-      // Convertir datos de pronóstico a formato Station para la fecha seleccionada inmediatamente
+      // Detectar la primera fecha disponible en los datos
+      const firstStation = Object.values(allForecasts)[0] as StationForecast;
+      const availableDate = firstStation?.forecast?.[0]?.date || date;
+      
+      // Si la fecha solicitada no está disponible, usar la primera disponible
+      const dateToUse = availableDate;
+      if (dateToUse !== date) {
+        console.log(`Fecha solicitada ${date} no disponible, usando ${dateToUse}`);
+        setSelectedForecastDate(dateToUse);
+      }
+      
+      // Convertir datos de pronóstico a formato Station para la fecha disponible
       const forecastStationsData: Station[] = Object.values(allForecasts).map((stationForecast: StationForecast) => {
-        const dayForecast = stationForecast.forecast.find((f: ForecastDay) => f.date === date);
+        const dayForecast = stationForecast.forecast.find((f: ForecastDay) => f.date === dateToUse);
         
         if (!dayForecast) {
           return {
             id: stationForecast.station_id,
             name: stationForecast.station_name,
+            region: stationForecast.region,
             lat: stationForecast.location.lat,
             lon: stationForecast.location.lon,
             elevation: stationForecast.location.elevation,
@@ -188,6 +200,7 @@ const Index = () => {
         return {
           id: stationForecast.station_id,
           name: stationForecast.station_name,
+          region: stationForecast.region,
           lat: stationForecast.location.lat,
           lon: stationForecast.location.lon,
           elevation: stationForecast.location.elevation,
@@ -232,6 +245,7 @@ const Index = () => {
         return {
           id: stationForecast.station_id,
           name: stationForecast.station_name,
+          region: stationForecast.region,
           lat: stationForecast.location.lat,
           lon: stationForecast.location.lon,
           elevation: stationForecast.location.elevation,
@@ -251,6 +265,7 @@ const Index = () => {
       return {
         id: stationForecast.station_id,
         name: stationForecast.station_name,
+        region: stationForecast.region,
         lat: stationForecast.location.lat,
         lon: stationForecast.location.lon,
         elevation: stationForecast.location.elevation,

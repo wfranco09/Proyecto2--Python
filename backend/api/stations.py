@@ -157,13 +157,6 @@ async def list_all_stations():
         # Crear mapa de datos por estación
         station_data_map = {s["station_id"]: s for s in all_stations_data}
         
-        # Cargar TODAS las alertas de una vez (evita 500+ consultas individuales)
-        all_alerts = get_all_alerts_by_station()
-        
-        # Listas para operaciones batch de alertas
-        alerts_to_upsert = []
-        alerts_to_remove = []
-        
         data = []
         for station in STATIONS:
             station_id = station.get("id")
@@ -191,58 +184,13 @@ async def list_all_stations():
                 })
                 continue
             
-            # Calcular probabilidades usando el modelo ML entrenado
-            try:
-                ml_predictor = get_risk_predictor()
-                if ml_predictor:
-                    # Preparar features para el modelo
-                    features = {
-                        'temperature': float(station_data.get('temperature') or 25.0),
-                        'humidity': float(station_data.get('humidity') or 70.0),
-                        'precipitation_total': float(station_data.get('precipitation_total') or 0.0),
-                        'wind_speed': float(station_data.get('wind_speed') or 0.0),
-                        'pressure': float(station_data.get('pressure') or 1013.0),
-                        # Cambios estimados vs promedios típicos de Panamá
-                        'temp_change': float(station_data.get('temperature') or 25.0) - 27.0,
-                        'humidity_change': float(station_data.get('humidity') or 70.0) - 75.0,
-                        'precip_change': float(station_data.get('precipitation_total') or 0.0) - 5.0,
-                        'wind_change': float(station_data.get('wind_speed') or 0.0) - 10.0,
-                        'pressure_change': float(station_data.get('pressure') or 1013.0) - 1013.0
-                    }
-                    
-                    # Usar modelo ML para predicción
-                    predictions = ml_predictor.predict(features)
-                    flood_prob = predictions['flood_risk']
-                    drought_prob = predictions['drought_risk']
-                else:
-                    raise ValueError("Modelo no disponible")
-            except Exception as e:
-                # Fallback: cálculo simple si el modelo no está disponible
-                logger.warning(f"Usando cálculo simple para estación {station_id}: {e}")
-                rainfall = float(station_data.get("precipitation_total") or 0.0)
-                humidity = float(station_data.get("humidity") or 0.0)
-                flood_prob = min(0.95, (rainfall / 50.0) * 0.6 + (humidity / 100.0) * 0.4)
-                drought_prob = min(0.95, (1 - rainfall / 50.0) * 0.6 + (1 - humidity / 100.0) * 0.4)
-            
-            # Determinar niveles categóricos
-            flood_level = predictor._get_risk_level(flood_prob)
-            drought_level = predictor._get_risk_level(drought_prob)
-            
-            # Preparar operaciones de alertas (no ejecutar todavía)
-            if flood_prob >= 0.50:
-                alerts_to_upsert.append((station_id, station.get("name"), "flood", flood_level, flood_prob))
-            else:
-                alerts_to_remove.append((station_id, "flood"))
-            
-            if drought_prob >= 0.50:
-                alerts_to_upsert.append((station_id, station.get("name"), "drought", drought_level, drought_prob))
-            else:
-                alerts_to_remove.append((station_id, "drought"))
-            
-            # Obtener timestamps de alertas del mapa precargado
-            station_alerts = all_alerts.get(station_id, {})
-            flood_alert = station_alerts.get("flood")
-            drought_alert = station_alerts.get("drought")
+            # Obtener datos básicos y riesgos precalculados de la DB
+            rainfall = float(station_data.get("precipitation_total") or 0.0)
+            humidity = float(station_data.get("humidity") or 0.0)
+            flood_prob = float(station_data.get("flood_probability") or 0.0)
+            flood_level = station_data.get("flood_level") or "GREEN"
+            drought_prob = float(station_data.get("drought_probability") or 0.0)
+            drought_level = station_data.get("drought_level") or "GREEN"
             
             data.append({
                 "id": station_id,
@@ -255,13 +203,11 @@ async def list_all_stations():
                     "probability": round(flood_prob, 3),
                     "level": flood_level,
                     "alert": flood_prob >= 0.5,
-                    "triggered_at": flood_alert["triggered_at"] if flood_alert else None,
                 },
                 "drought_risk": {
                     "probability": round(drought_prob, 3),
                     "level": drought_level,
                     "alert": drought_prob >= 0.5,
-                    "triggered_at": drought_alert["triggered_at"] if drought_alert else None,
                 },
                 "current_conditions": {
                     "temperature": station_data.get("temperature"),
@@ -273,16 +219,9 @@ async def list_all_stations():
                 "last_update": station_data.get("timestamp"),
             })
         
-        # Ejecutar operaciones de alertas en batch (fuera del loop principal)
-        # Esto evita bloquear la respuesta con operaciones de escritura
-        try:
-            for station_id, station_name, alert_type, risk_level, probability in alerts_to_upsert:
-                _manage_alert(station_id, station_name, alert_type, probability, risk_level)
-            for station_id, alert_type in alerts_to_remove:
-                if all_alerts.get(station_id, {}).get(alert_type):  # Solo remover si existe
-                    remove_alert(station_id, alert_type)
-        except Exception as e:
-            logger.warning(f"Error actualizando alertas en batch: {e}")
+        # OPTIMIZACIÓN: Las alertas se actualizan en el background via pipeline
+        # NO bloquear la respuesta HTTP con operaciones de escritura masivas
+        # Las alertas se actualizan automáticamente cada hora cuando el pipeline corre
         
         return {
             "total_stations": len(data),
