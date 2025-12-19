@@ -8,7 +8,7 @@ import os
 import json
 import logging
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from typing import List, Dict, Optional
 from pathlib import Path
 
@@ -19,6 +19,67 @@ logger = logging.getLogger(__name__)
 # API Key de Meteosource
 METEOSOURCE_API_KEY = os.getenv("METEOSOURCE_API_KEY", "")
 METEOSOURCE_BASE_URL = "https://www.meteosource.com/api/v1/free"
+
+# Archivo para rastrear estado de la API (5 niveles arriba: forecast_pipeline -> meteosource -> etl -> pipelines -> core -> backend)
+API_STATE_FILE = Path(__file__).parent.parent.parent.parent.parent / "cache" / "api_state.json"
+
+
+def get_api_state() -> Dict:
+    """Lee el estado de la API desde el archivo cache."""
+    if API_STATE_FILE.exists():
+        try:
+            with open(API_STATE_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            pass
+    return {"last_success": None, "consecutive_failures": 0, "last_attempt_date": None}
+
+
+def save_api_state(state: Dict):
+    """Guarda el estado de la API en el archivo cache."""
+    try:
+        API_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(API_STATE_FILE, 'w') as f:
+            json.dump(state, f)
+    except Exception as e:
+        logger.warning(f"No se pudo guardar estado de API: {e}")
+
+
+def should_attempt_api() -> bool:
+    """
+    Determina si debemos intentar llamar a la API.
+    Después de 10 fallos consecutivos en el mismo día, usa solo datos simulados.
+    """
+    state = get_api_state()
+    today = str(date.today())
+    
+    # Si es un nuevo día, resetear el contador
+    if state.get("last_attempt_date") != today:
+        return True
+    
+    # Si ya fallamos 10 veces hoy, no intentar más
+    if state.get("consecutive_failures", 0) >= 10:
+        logger.warning(f" Límite de fallos alcanzado hoy ({state['consecutive_failures']}). Usando solo datos simulados.")
+        return False
+    
+    return True
+
+
+def record_api_result(success: bool):
+    """Registra el resultado de un intento de API."""
+    state = get_api_state()
+    today = str(date.today())
+    
+    if success:
+        state["last_success"] = today
+        state["consecutive_failures"] = 0
+        logger.info(f" ✅ API exitosa - reseteando contador de fallos")
+    else:
+        state["consecutive_failures"] = state.get("consecutive_failures", 0) + 1
+        logger.debug(f" Fallo {state['consecutive_failures']} registrado en {API_STATE_FILE}")
+    
+    state["last_attempt_date"] = today
+    save_api_state(state)
 
 
 def fetch_forecast_for_station(station: Dict) -> Optional[List[Dict]]:
@@ -186,15 +247,88 @@ def fetch_forecast_for_station(station: Dict) -> Optional[List[Dict]]:
         return None
 
 
+def generate_simulated_forecast(station: Dict, forecast_date: str) -> Dict:
+    """
+    Genera datos simulados de forecast para demostración cuando la API no está disponible.
+    Usa variaciones realistas basadas en datos climáticos de Panamá.
+    
+    Args:
+        station: Diccionario con datos de la estación
+        forecast_date: Fecha del forecast (YYYY-MM-DD)
+        
+    Returns:
+        Diccionario con datos de forecast simulados
+    """
+    import random
+    from datetime import datetime
+    
+    # Semilla basada en station_id y fecha para consistencia
+    random.seed(station['id'] * 1000 + int(forecast_date.replace('-', '')))
+    
+    # Valores base típicos de Panamá
+    base_temp = 27.0 + random.uniform(-3, 3)  # 24-30°C
+    base_humidity = 75.0 + random.uniform(-10, 10)  # 65-85%
+    base_pressure = 1013.0 + random.uniform(-5, 5)  # 1008-1018 hPa
+    
+    # Precipitación: algunos días con lluvia, otros secos
+    if random.random() > 0.4:  # 60% probabilidad de lluvia
+        precipitation = random.uniform(5, 40)  # 5-40mm
+    else:
+        precipitation = random.uniform(0, 2)  # Poco o nada
+    
+    return {
+        "station_id": station['id'],
+        "station_name": station['name'],
+        "region": station.get('region', 'Panamá'),
+        "latitude": station['lat'],  # Agregar todos los campos requeridos por DB
+        "longitude": station['lon'],
+        "elevation": station.get('elevation', 0),
+        "forecast_date": forecast_date,
+        "temperature": base_temp,
+        "temp_min": base_temp - random.uniform(2, 4),
+        "temp_max": base_temp + random.uniform(2, 4),
+        "temp_avg": base_temp,
+        "precipitation_total": precipitation,
+        "precipitation_probability": min(100, precipitation * 3),
+        "wind_speed_max": random.uniform(5, 20),  # 5-20 km/h
+        "wind_direction": None,
+        "wind_angle": None,
+        "humidity": base_humidity,
+        "pressure": base_pressure,
+        "cloud_cover": random.uniform(30, 90) if precipitation > 5 else random.uniform(10, 50),
+        "summary": f"Precip: {precipitation:.1f}mm (SIMULADO)",
+        "icon": "rain" if precipitation > 5 else "partly_cloudy",
+        "retrieved_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def fetch_all_forecasts() -> List[Dict]:
     """
     Obtiene pronósticos para todas las estaciones configuradas.
-    Se detiene después de 5 errores consecutivos (por ejemplo, límite de API excedido).
+    Si falla la API (5 errores consecutivos), genera datos simulados para demostración.
+    Si ya fallamos 10 veces hoy, usa directamente datos simulados sin intentar la API.
     
     Returns:
-        Lista con todos los pronósticos
+        Lista con todos los pronósticos (reales o simulados)
     """
     all_forecasts = []
+    
+    # Verificar si debemos intentar la API o ir directo a simulados
+    if not should_attempt_api():
+        logger.warning(" 🎲 Usando solo datos simulados (límite de fallos alcanzado hoy)")
+        from datetime import date, timedelta
+        today = date.today()
+        
+        for sim_station in STATIONS:
+            for days_ahead in [0, 1]:  # Hoy y mañana
+                forecast_date = (today + timedelta(days=days_ahead)).strftime('%Y-%m-%d')
+                simulated = generate_simulated_forecast(sim_station, forecast_date)
+                all_forecasts.append(simulated)
+        
+        logger.info(f" 🎲 Generados {len(all_forecasts)} pronósticos simulados")
+        return all_forecasts
+    
+    # Intentar obtener datos reales de la API
     consecutive_errors = 0
     max_consecutive_errors = 5
     
@@ -206,14 +340,28 @@ def fetch_all_forecasts() -> List[Dict]:
         if forecast_data:
             all_forecasts.extend(forecast_data)
             consecutive_errors = 0  # Resetear contador en caso de éxito
+            record_api_result(success=True)  # Registrar éxito
         else:
             consecutive_errors += 1
+            record_api_result(success=False)  # Registrar cada fallo
             logger.warning(f" No se obtuvo forecast para {station['name']} (error {consecutive_errors}/{max_consecutive_errors})")
             
-            # Si alcanzamos el límite de errores consecutivos, parar el pipeline
+            # Si alcanzamos el límite de errores consecutivos, usar datos simulados
             if consecutive_errors >= max_consecutive_errors:
-                logger.error(f" ✗ Límite de errores consecutivos alcanzado ({max_consecutive_errors}). Deteniendo pipeline.")
-                logger.error(f" Probable causa: Límite de API excedido. Se reintentará en la próxima ejecución programada.")
+                logger.error(f" ✗ Límite de errores consecutivos alcanzado ({max_consecutive_errors}). Deteniendo obtención de API.")
+                logger.warning(f" 🎲 Generando datos simulados para TODAS las estaciones (demostración)...")
+                
+                # Generar datos simulados para hoy y mañana para TODAS las estaciones
+                from datetime import date, timedelta
+                today = date.today()
+                
+                for sim_station in STATIONS:
+                    for days_ahead in [0, 1]:  # Hoy y mañana
+                        forecast_date = (today + timedelta(days=days_ahead)).strftime('%Y-%m-%d')
+                        simulated = generate_simulated_forecast(sim_station, forecast_date)
+                        all_forecasts.append(simulated)
+                
+                logger.info(f" 🎲 Generados {len(all_forecasts)} pronósticos simulados")
                 break
     
     logger.info(f" Total de pronósticos obtenidos: {len(all_forecasts)}")
@@ -235,7 +383,8 @@ def calculate_risks_for_forecasts(forecasts: List[Dict]) -> List[Dict]:
         from pathlib import Path
         from core.ml.risk_predictor import RiskPredictor
         
-        model_path = Path(__file__).parent.parent.parent.parent / "ml_models" / "risk_model.joblib"
+        # Subir 5 niveles: forecast_pipeline.py -> meteosource -> etl -> pipelines -> core -> backend
+        model_path = Path(__file__).parent.parent.parent.parent.parent / "ml_models" / "risk_model.joblib"
         
         if not model_path.exists():
             logger.warning(f" Modelo de riesgo no encontrado en {model_path}, usando valores por defecto")
@@ -256,28 +405,35 @@ def calculate_risks_for_forecasts(forecasts: List[Dict]) -> List[Dict]:
         # Calcular riesgos para cada forecast
         for forecast in forecasts:
             try:
-                # Preparar features del forecast
+                # Preparar features del forecast (el modelo necesita precipitation_total, no precipitation)
                 features = {
-                    'temperature': forecast.get('temperature', 0),
+                    'temperature': forecast.get('temperature', forecast.get('temp_avg', 0)),
                     'humidity': forecast.get('humidity', 0),
-                    'precipitation': forecast.get('precipitation', 0),
-                    'wind_speed': forecast.get('wind_speed', 0),
+                    'precipitation_total': forecast.get('precipitation_total', forecast.get('precipitation', 0)),
+                    'wind_speed': forecast.get('wind_speed_max', forecast.get('wind_speed', 0)),
                     'pressure': forecast.get('pressure', 1013.25),
-                    'cloud_cover': forecast.get('cloud_cover', 0),
-                    'uv_index': forecast.get('uv_index', 0),
+                    # Cambios (tendencias) - por ahora usar 0 ya que no tenemos histórico del forecast
+                    'temp_change': 0,
+                    'humidity_change': 0,
+                    'precip_change': 0,
+                    'wind_change': 0,
+                    'pressure_change': 0,
                 }
                 
-                # Predecir riesgo de inundación
-                flood_risk = predictor.predict(features)
-                forecast["flood_probability"] = flood_risk[1]  # probabilidad
-                forecast["flood_level"] = flood_risk[0]  # nivel (GREEN, YELLOW, RED)
-                forecast["flood_alert"] = 1 if flood_risk[0] in ["YELLOW", "RED"] else 0
+                # Predecir riesgos (devuelve dict con flood_risk y drought_risk)
+                risk_prediction = predictor.predict(features)
                 
-                # Predecir riesgo de sequía (usando mismas features por ahora)
-                drought_risk = predictor.predict(features)
-                forecast["drought_probability"] = drought_risk[1]
-                forecast["drought_level"] = drought_risk[0]
-                forecast["drought_alert"] = 1 if drought_risk[0] in ["YELLOW", "RED"] else 0
+                # Asignar riesgos de inundación
+                flood_prob = risk_prediction['flood_risk']
+                forecast["flood_probability"] = flood_prob
+                forecast["flood_level"] = "RED" if flood_prob >= 0.7 else ("YELLOW" if flood_prob >= 0.3 else "GREEN")
+                forecast["flood_alert"] = 1 if flood_prob >= 0.3 else 0
+                
+                # Asignar riesgos de sequía
+                drought_prob = risk_prediction['drought_risk']
+                forecast["drought_probability"] = drought_prob
+                forecast["drought_level"] = "RED" if drought_prob >= 0.7 else ("YELLOW" if drought_prob >= 0.3 else "GREEN")
+                forecast["drought_alert"] = 1 if drought_prob >= 0.3 else 0
                 
             except Exception as e:
                 logger.error(f" Error calculando riesgo para forecast de estación {forecast.get('station_id')}: {e}")

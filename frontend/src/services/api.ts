@@ -8,6 +8,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 export interface Station {
   id: number;
   name: string;
+  region?: string;
   lat: number;
   lon: number;
   elevation: number;
@@ -132,6 +133,7 @@ export interface ForecastDay {
 export interface StationForecast {
   station_id: number;
   station_name: string;
+  region: string;
   location: {
     lat: number;
     lon: number;

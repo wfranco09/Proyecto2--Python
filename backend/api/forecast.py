@@ -284,6 +284,7 @@ async def get_station_forecast(
         return {
             "station_id": station_id,
             "station_name": station.get("name"),
+            "region": station.get("region"),
             "location": {
                 "lat": station.get("lat"),
                 "lon": station.get("lon"),
@@ -367,6 +368,7 @@ async def get_all_stations_forecast(
             return (station_id, {
                 "station_id": station_id,
                 "station_name": station.get("name"),
+                "region": station.get("region"),
                 "location": {
                     "lat": station.get("lat"),
                     "lon": station.get("lon"),

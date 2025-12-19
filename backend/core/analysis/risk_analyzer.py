@@ -71,7 +71,7 @@ class RiskAnalyzer:
     
     def __init__(self):
         """Inicializa el analizador"""
-        from core.database.weather_db import (
+        from core.database.raindrop_db import (
             get_latest_data_by_station,
             get_data_by_date_range
         )
